@@ -423,4 +423,21 @@ TEST_CASE("orca.slicing set_slices: ndarray input mutates the slice geometry (re
     REQUIRE(ex.holes.size() == 1);
     CHECK(ex.holes.front().is_clockwise());                  // hole re-oriented CW
     CHECK(region2.slices.surfaces.front().surface_type == Slic3r::stInternal); // default (no template)
+
+    // Fix 6: a malformed holes element (a [contour, holes] entry whose holes slot is not a
+    // sequence, e.g. an int) must raise ValueError, not a bare Python TypeError from iterating a
+    // non-iterable. This lives in the numpy-guarded section because reaching the holes check
+    // requires a real ndarray contour as the first element.
+    auto raises_value_error = [](py::object callable, py::object arg) {
+        try { callable(arg); return false; }
+        catch (py::error_already_set& e) { return e.matches(PyExc_ValueError); }
+    };
+    py::list bad_entry;
+    bad_entry.append(make_arr({ {0,0}, {s,0}, {s,s}, {0,s} }));   // valid CCW contour
+    bad_entry.append(py::int_(42));                              // holes slot is an int -> invalid
+    py::list bad_polys;
+    bad_polys.append(bad_entry);
+    CHECK(raises_value_error(lrv2.attr("set_slices"), bad_polys));
+    // The failed call left the previously-set single surface untouched.
+    CHECK(region2.slices.surfaces.size() == 1);
 }

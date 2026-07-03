@@ -59,10 +59,18 @@ TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slic
 #include <sstream>
 
 TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)", "[slicing_pipeline]") {
-    auto run = [](bool set_noop_hook) {
+    // Three configurations must all normalize to the same G-code:
+    //   (activate=false, hook=none) baseline -- feature entirely absent.
+    //   (activate=false, hook=noop) hook registered but option empty -> gated off, never fires.
+    //   (activate=true,  hook=noop) hook ACTIVE and firing at every pipeline seam, mutating
+    //                               nothing. This is the real backward-compat claim: an active
+    //                               but non-mutating hook must not perturb the output.
+    auto run = [](bool activate, bool set_noop_hook) {
         Slic3r::Print print; Slic3r::Model model;
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
-        // NOTE: option left EMPTY -> plugin inactive regardless of hook presence.
+        // Activating requires BOTH a non-empty option and a registered hook (see Print::apply).
+        if (activate)
+            config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
         if (set_noop_hook)
             Slic3r::Print::set_slicing_pipeline_hook_fn([](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){});
         else
@@ -89,11 +97,76 @@ TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)
             // "; [stop] printing object <name> id:N copy M" and
             // "; start/stop printing object, unique label id: N" (ObjectID-derived):
             if (line.find("printing object") != std::string::npos && line.find(" id:") != std::string::npos) continue;
+            // Config-dump comment: the active run legitimately records the selected plugin
+            // ("; slicing_pipeline_plugin = probe") while the baseline leaves it empty. This
+            // is a machine-irrelevant comment, not motion -- strip it so the comparison isolates
+            // whether the active-but-non-mutating hook perturbs the real toolpath.
+            if (line.find("slicing_pipeline_plugin") != std::string::npos) continue;
             out += line; out += '\n';
         }
         return out;
     };
-    CHECK(normalize(run(false)) == normalize(run(true))); // firing nothing (inactive) must not perturb slicing
+    const std::string baseline = normalize(run(false, false));       // feature absent
+    CHECK(normalize(run(false, true)) == baseline);                   // gated off: hook never fires
+    CHECK(normalize(run(true,  true)) == baseline);                   // active no-op hook fires everywhere, mutates nothing
+}
+
+// Fix 4(a): gating negative path. With the option EMPTY the plugin is inactive, so a
+// registered hook must NOT fire even once across a full slice (m_pipeline_plugin_active
+// stays false in Print::apply). Distinct from the byte-identical test above: this asserts
+// the gate directly by counting invocations rather than comparing output.
+TEST_CASE("Empty option: registered hook is gated off and never fires", "[slicing_pipeline]") {
+    int calls = 0;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){ ++calls; });
+    Slic3r::Print print; Slic3r::Model model;
+    auto config = Slic3r::DynamicPrintConfig::full_print_config();
+    // option left EMPTY -> inactive regardless of the registered hook.
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    print.process();
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+    CHECK(calls == 0);
+}
+
+// Fix 4(b): duplicate-skip gating. Two ModelObjects that share one mesh_ptr are detected as
+// identical by Print::process()'s is_print_object_the_same(); the second becomes a shared
+// (duplicate) object and is NOT re-sliced, so the Slice hook must fire exactly once even
+// though there are two print objects. The clone shares mesh_ptr and copies the volume
+// transformation/config (ModelVolume copy ctor), which the equality check requires.
+TEST_CASE("Duplicate objects share a slice: Slice hook fires exactly once", "[slicing_pipeline]") {
+    int slice_calls = 0, perim_calls = 0;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep s){
+            if (s == Slic3r::SlicingPipelineStep::Slice)      ++slice_calls;
+            if (s == Slic3r::SlicingPipelineStep::Perimeters) ++perim_calls;
+        });
+
+    Slic3r::Print print; Slic3r::Model model;
+    auto config = Slic3r::DynamicPrintConfig::full_print_config();
+    config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // activate
+
+    // init_print builds one arranged, on-bed cube object (o1).
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    Slic3r::ModelObject* o1 = model.objects.front();
+    // Model::add_object(const ModelObject&) force-sets object extruder=1 on the clone; give o1
+    // the same so the two objects' configs match (is_print_object_the_same compares config).
+    if (!o1->config.has("extruder"))
+        o1->config.set_key_value("extruder", new Slic3r::ConfigOptionInt(1));
+    // Clone o1: shares mesh_ptr and copies the volume transformation + config (genuine duplicate).
+    Slic3r::ModelObject* o2 = model.add_object(*o1);
+    // Shift the clone in X so validate() sees no collision (20mm cubes -> 40mm centres = 20mm gap).
+    for (Slic3r::ModelInstance* inst : o2->instances)
+        inst->set_offset(inst->get_offset() + Slic3r::Vec3d(40.0, 0.0, 0.0));
+
+    print.apply(model, config);
+    print.validate();
+    print.set_status_silent();
+    print.process();
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+
+    REQUIRE(print.objects().size() == 2);   // two print objects present...
+    CHECK(slice_calls == 1);                // ...but the duplicate is skipped -> one slice
+    CHECK(perim_calls == 1);                // and one perimeters pass (the sliced object)
 }
 
 #include "libslic3r/Layer.hpp"          // Layer, LayerRegion (full defs for the cascade hook)
