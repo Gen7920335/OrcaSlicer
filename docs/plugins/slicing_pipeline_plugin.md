@@ -28,7 +28,8 @@ class MyCapability(orca.slicing.SlicingPipelineCapabilityBase):
 `ctx.step` is one of the `orca.slicing.Step` values, in the order they occur inside
 one `Print::process()` run: `Slice`, `Perimeters`, `EstimateCurledExtrusions`,
 `Infill`, `Ironing`, `Contouring`, `SupportMaterial`, `DetectOverhangsForLift`,
-`SimplifyPath`, `WipeTower`, `SkirtBrim`.
+`WipeTower`, `SkirtBrim`, `SimplifyPath`. Note that `SimplifyPath` is declared
+before `WipeTower` and `SkirtBrim` in the `Step` enum, but fires after them at runtime.
 
 Most steps are **per-object**: `execute()` runs once per `PrintObject` that just
 (re)computed that step, and `ctx.object` is a `PrintObjectView` for it. `WipeTower`
