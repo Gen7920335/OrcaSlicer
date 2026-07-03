@@ -279,7 +279,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             || opt_key == "wipe_tower_rotation_angle") {
             steps.emplace_back(psSkirtBrim);
         } else if (
-               opt_key == "initial_layer_print_height"
+               opt_key == "slicing_pipeline_plugin"
+            || opt_key == "initial_layer_print_height"
             || opt_key == "nozzle_diameter"
             || opt_key == "filament_shrink"
             || opt_key == "filament_shrinkage_compensation_z"
@@ -2203,7 +2204,10 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
     if (time_cost_with_cache)
         *time_cost_with_cache = 0;
 
-    m_pipeline_plugin_active = true; // TEMPORARY: Task 4 replaces this with activation computed from the slicing_pipeline_plugin option
+    {
+        const auto* sp = this->config().option<ConfigOptionStrings>("slicing_pipeline_plugin");
+        m_pipeline_plugin_active = s_slicing_pipeline_hook_fn && sp && !sp->values.empty();
+    }
 
     name_tbb_thread_pool_threads_set_locale();
 

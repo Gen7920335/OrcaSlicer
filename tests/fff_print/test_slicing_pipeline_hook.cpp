@@ -55,3 +55,31 @@ TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slic
     auto idx = [&](S s){ for (size_t i=0;i<calls.size();++i) if (calls[i].step==s) return (int)i; return -1; };
     CHECK(idx(S::Slice) < idx(S::Perimeters));
 }
+
+TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)", "[slicing_pipeline]") {
+    auto run = [](bool set_noop_hook) {
+        Slic3r::Print print; Slic3r::Model model;
+        auto config = Slic3r::DynamicPrintConfig::full_print_config();
+        // NOTE: option left EMPTY -> plugin inactive regardless of hook presence.
+        if (set_noop_hook)
+            Slic3r::Print::set_slicing_pipeline_hook_fn([](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){});
+        else
+            Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        std::string g = Slic3r::Test::gcode(print);
+        Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        return g;
+    };
+    CHECK(run(false) == run(true)); // firing nothing (inactive) must not perturb slicing
+}
+
+TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pipeline]") {
+    Slic3r::Print print; Slic3r::Model model;
+    auto config = Slic3r::DynamicPrintConfig::full_print_config();
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    print.process();
+    REQUIRE(print.objects().front()->is_step_done(posSlice));
+    config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
+    print.apply(model, config);
+    CHECK_FALSE(print.objects().front()->is_step_done(posSlice)); // re-slice required
+}
