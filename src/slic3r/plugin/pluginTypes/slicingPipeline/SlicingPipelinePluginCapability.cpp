@@ -34,7 +34,9 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
     py::class_<SlicingPipelinePluginCapability, PluginCapabilityInterface,
                PySlicingPipelinePluginCapabilityTrampoline,
                std::shared_ptr<SlicingPipelinePluginCapability>>(slicing, "SlicingPipelineCapabilityBase")
-        .def(py::init<>());
+        .def(py::init<>())
+        .def("get_type", &SlicingPipelinePluginCapability::get_type)
+        .def("execute", &SlicingPipelinePluginCapability::execute);
 }
 
 } // namespace Slic3r
