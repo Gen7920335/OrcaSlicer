@@ -107,10 +107,16 @@ data, not into some separate plugin-owned overlay:
 
 - **It survives across steps within the same slice** — that's what makes the
   cascade into perimeters/infill/G-code work.
-- **It is not re-applied on an incremental re-slice that finds `Slice` cached.**
-  If you edit an unrelated setting that only invalidates a *later* step, the
-  `Slice` hook does not fire again — the previously mutated geometry is simply
-  reused as-is. You do not need to reapply anything for that to keep working.
+- **It survives an incremental re-slice only while `posSlice` stays cached *and*
+  perimeters are not re-run (v1 limitation).** `slice()` backs up the *pre-hook*
+  geometry into each layer's `raw_slices` before the `Slice` hook fires, and
+  `make_perimeters()` calls `restore_untyped_slices()`, which overwrites
+  `slices` from that backup. So a config change that only invalidates a *later*
+  step but still re-runs perimeters (e.g. `wall_loops`) silently reverts the
+  mutation to the original geometry, while `posSlice` stays cached so the `Slice`
+  hook does **not** fire again to re-apply it. Propagating the mutation into
+  `raw_slices` so it survives a perimeter re-run is a known v1 limitation; for
+  now, force a genuine re-slice (see below) if you need the mutation reapplied.
 - **Toggling which plugins are selected always gets a clean slice.** Changing the
   `Slicing Pipeline Plugin` picker selection itself invalidates `posSlice`, so
   selecting or deselecting a plugin forces a genuine re-slice (and re-fires the

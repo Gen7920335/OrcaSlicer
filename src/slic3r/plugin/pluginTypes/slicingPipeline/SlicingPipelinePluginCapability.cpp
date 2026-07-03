@@ -108,12 +108,20 @@ static ExPolygon parse_expolygon(py::handle entry, const char* who)
         if (py::len(seq) < 1)
             throw py::value_error(std::string(who) + ": a [contour, holes] entry needs a contour");
         ex.contour = parse_polygon(seq[0], who);
-        if (py::len(seq) >= 2)
-            for (py::handle hh : py::reinterpret_borrow<py::sequence>(seq[1])) {
+        if (py::len(seq) >= 2) {
+            // Type-check the holes element up front: a non-sequence (e.g. an int) would otherwise
+            // reach reinterpret_borrow<py::sequence> and raise a bare Python TypeError on iteration,
+            // whereas the API contract is ValueError for malformed input (str is excluded because it
+            // is iterable but never a valid holes container).
+            py::object holes_obj = seq[1];
+            if (!py::isinstance<py::sequence>(holes_obj) || py::isinstance<py::str>(holes_obj))
+                throw py::value_error(std::string(who) + ": the holes element must be a list of (N,2) int64 ndarrays");
+            for (py::handle hh : py::reinterpret_borrow<py::sequence>(holes_obj)) {
                 Polygon hole = parse_polygon(hh, who);
                 hole.make_clockwise();
                 ex.holes.emplace_back(std::move(hole));
             }
+        }
     } else {
         throw py::value_error(std::string(who) + ": each entry must be an (N,2) ndarray or a [contour, holes] pair");
     }
@@ -208,7 +216,7 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .def_property_readonly("extra_perimeters", [](const SurfaceView& v) { return v.s->extra_perimeters; })
         .def_property_readonly("expolygon",        [](const SurfaceView& v) {
             return ExPolygonView{ &v.s->expolygon, v.owner };
-        })
+        }, "This surface's geometry as an ExPolygonView. Valid only during the execute(ctx) call.")
         // MUTATOR (Task 11). Reclassify this surface's type (e.g. SurfaceType.stInternalSolid).
         // set_type reassigns surface_type ONLY — it does not replace the geometry. Writes through
         // the const view by const_cast (the Surface is non-const in the live slicing graph).
@@ -272,9 +280,16 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
            "MUTATION-CASCADE: at the Slice boundary this is the primary, fully-supported entry "
            "point -- the split slice loop runs make_perimeters() afterward, so the change cascades "
            "into perimeters and everything downstream (final G-code).\n"
-           "PERSISTENCE: the mutation is stored in the object's Layer data, so an incremental "
-           "re-slice with the Slice step cached does NOT re-apply it (the hook fires only on "
-           "genuine recomputation).\n"
+           "PERSISTENCE (v1 limitation): the mutation is written into region->slices, but the "
+           "pre-hook geometry is also retained in each Layer's raw_slices backup (taken by "
+           "slice() BEFORE this hook fires). The mutation therefore survives only while posSlice "
+           "stays cached AND perimeters are not re-run from those restored raw slices: "
+           "make_perimeters() calls restore_untyped_slices(), which overwrites slices from "
+           "raw_slices, so a config change that re-runs perimeters without re-slicing (e.g. "
+           "wall_loops) silently reverts to the original geometry while posSlice stays cached "
+           "(this hook does NOT re-fire). Re-selecting the plugin -- or any other "
+           "posSlice-invalidating change -- re-fires this hook and re-applies the mutation. "
+           "Propagating the mutation into raw_slices is a known v1 limitation.\n"
            "DUPLICATES: identical objects share Layer*, so the mutation on the object that slices "
            "is automatically seen by its duplicates; objects that must mutate independently must "
            "not be identical.\n"

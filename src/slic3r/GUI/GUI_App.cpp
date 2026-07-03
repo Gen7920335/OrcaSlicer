@@ -3132,7 +3132,11 @@ bool GUI_App::on_init_inner()
     Slic3r::Print::set_slicing_pipeline_hook_fn(
         [](Slic3r::Print& print, const Slic3r::PrintObject* object, Slic3r::SlicingPipelineStep step) {
             const auto* caps  = print.config().option<ConfigOptionStrings>("slicing_pipeline_plugin");
-            const auto* plugs = print.config().option<ConfigOptionStrings>("plugins");
+            // `plugins` is a dynamic-only manifest key (not a static PrintConfig member), so it
+            // must be read from the full/dynamic config -- reading it off print.config() (the
+            // static PrintConfig) always yields nullptr and skips every capability. Mirrors the
+            // post-process path (PostProcessor.cpp, via BackgroundSlicingProcess::full_print_config()).
+            const auto* plugs = print.full_print_config().option<ConfigOptionStrings>("plugins");
             if (caps == nullptr || caps->values.empty())
                 return;
 
