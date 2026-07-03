@@ -2,7 +2,10 @@
 #include "SlicingPipelinePluginCapabilityTrampoline.hpp"
 #include "SlicingNumpy.hpp"          // make_readonly_rows
 #include "libslic3r/libslic3r.h"    // unscale<>, live SCALING_FACTOR
+#include "libslic3r/ExtrusionEntity.hpp"            // ExtrusionPath/Loop/MultiPath, role_to_string
+#include "libslic3r/ExtrusionEntityCollection.hpp"  // ExtrusionEntityCollection
 #include <pybind11/stl.h>
+#include <vector>
 
 namespace py = pybind11;
 namespace Slic3r {
@@ -17,6 +20,48 @@ static py::array polygon_rows(const py::capsule& owner, const Polygon& poly)
     const Points& p = poly.points;
     return make_readonly_rows<coord_t, 2>(
         owner, p.empty() ? nullptr : p.front().data(), (py::ssize_t) p.size());
+}
+
+// Flatten an extrusion graph into a list of leaf ExtrusionPath* while walking the
+// ORIGINAL Print-owned tree (never a temporary copy): the returned pointers stay
+// valid for the execute(ctx) lifetime pinned by `owner`, so points() can hand out
+// zero-copy views into path->polyline.points.
+//
+// This is deliberately NOT ExtrusionEntityCollection::flatten(): flatten() only
+// unwraps nested collections (is_collection() is true solely for collections) and
+// returns them by value, so it would (a) dangle if we viewed into the copy and
+// (b) leave ExtrusionLoop/ExtrusionMultiPath intact — dropping every perimeter
+// loop, since dynamic_cast<ExtrusionPath*> fails on a loop. We descend into
+// loops/multipaths here to reach their contained paths.
+static void collect_extrusion_paths(const ExtrusionEntity* ee, std::vector<const ExtrusionPath*>& out)
+{
+    if (ee == nullptr)
+        return;
+    if (const auto* coll = dynamic_cast<const ExtrusionEntityCollection*>(ee)) {
+        for (const ExtrusionEntity* child : coll->entities)
+            collect_extrusion_paths(child, out);
+    } else if (const auto* loop = dynamic_cast<const ExtrusionLoop*>(ee)) {
+        for (const ExtrusionPath& p : loop->paths)
+            out.push_back(&p);
+    } else if (const auto* mp = dynamic_cast<const ExtrusionMultiPath*>(ee)) {
+        for (const ExtrusionPath& p : mp->paths)
+            out.push_back(&p);
+    } else if (const auto* path = dynamic_cast<const ExtrusionPath*>(ee)) {
+        // Catches ExtrusionPath and its subclasses (Sloped/Contoured/Oriented) last,
+        // after the composite types above have been ruled out.
+        out.push_back(path);
+    }
+}
+
+// Build a Python list of PathData over an extrusion collection, each entry pinned by `owner`.
+static py::list path_data_list(const py::capsule& owner, const ExtrusionEntityCollection& coll)
+{
+    std::vector<const ExtrusionPath*> paths;
+    collect_extrusion_paths(&coll, paths);
+    py::list out;
+    for (const ExtrusionPath* p : paths)
+        out.append(PathData{ p, owner });
+    return out;
 }
 } // namespace
 
@@ -81,6 +126,22 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
             return ExPolygonView{ &v.s->expolygon, v.owner };
         });
 
+    // A flattened toolpath. Read-only in v1 (mutation is a later phase). role/width/
+    // height/mm3_per_mm are plain scalars; points() materializes a zero-copy array.
+    py::class_<PathData>(slicing, "PathData")
+        .def("points", [](const PathData& p) {
+            const Points3& pts = p.path->polyline.points;
+            return make_readonly_rows<coord_t, 3>(
+                p.owner, pts.empty() ? nullptr : pts.front().data(), (py::ssize_t) pts.size());
+        }, "Path vertices as a read-only int64 (N,3) numpy view in scaled coords "
+           "(the polyline is natively 3D on this branch). Valid only during the execute(ctx) call.")
+        .def_property_readonly("role", [](const PathData& p) {
+            return ExtrusionEntity::role_to_string(p.path->role());
+        }, "Extrusion role as a human-readable string (e.g. \"Outer wall\", \"Sparse infill\").")
+        .def_property_readonly("width",      [](const PathData& p) { return p.path->width; })
+        .def_property_readonly("height",     [](const PathData& p) { return p.path->height; })
+        .def_property_readonly("mm3_per_mm", [](const PathData& p) { return p.path->mm3_per_mm; });
+
     py::class_<LayerRegionView>(slicing, "LayerRegionView")
         .def("slices", [](const LayerRegionView& v) {
             py::list out;
@@ -95,7 +156,15 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
                 out.append(SurfaceView{ &s, v.owner });
             return out;
         }, "Surfaces prepared for infill as [SurfaceView]. "
-           "Valid only during the execute(ctx) call.");
+           "Valid only during the execute(ctx) call.")
+        .def("perimeters", [](const LayerRegionView& v) {
+            return path_data_list(v.owner, v.r->perimeters);
+        }, "Perimeter toolpaths flattened to [PathData] (nested collections and "
+           "loops decomposed into their paths). Valid only during the execute(ctx) call.")
+        .def("fills", [](const LayerRegionView& v) {
+            return path_data_list(v.owner, v.r->fills);
+        }, "Infill toolpaths flattened to [PathData] (nested collections and loops "
+           "decomposed into their paths). Valid only during the execute(ctx) call.");
 
     py::class_<LayerView>(slicing, "LayerView")
         .def_property_readonly("slice_z", [](const LayerView& v) { return v.l->slice_z; })

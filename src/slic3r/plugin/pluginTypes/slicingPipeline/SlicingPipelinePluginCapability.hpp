@@ -31,6 +31,12 @@ struct LayerRegionView { const LayerRegion* r;  pybind11::capsule owner; };
 struct LayerView       { const Layer*       l;  pybind11::capsule owner; };
 struct PrintObjectView { const PrintObject* o;  pybind11::capsule owner; };
 
+// A single flattened toolpath (Task 9). `path` points into a Print-owned
+// ExtrusionEntityCollection (a LayerRegion's `perimeters`/`fills`); like every
+// view above it is non-owning and valid ONLY during the producing execute(ctx)
+// call, with `owner` pinning that Print* alive for any array points() hands out.
+struct PathData        { const ExtrusionPath* path; pybind11::capsule owner; };
+
 struct SlicingPipelineContext {
     std::string          orca_version;
     SlicingPipelineStep  step { SlicingPipelineStep::Slice };
