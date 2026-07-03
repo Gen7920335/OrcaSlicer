@@ -294,6 +294,7 @@ void bind_python_api(pybind11::module_& m)
                            .value("Exporter", PluginCapabilityType::Exporter)
                            .value("Visualization", PluginCapabilityType::Visualization)
                            .value("Script", PluginCapabilityType::Script)
+                           .value("SlicingPipeline", PluginCapabilityType::SlicingPipeline)
                            .value("Unknown", PluginCapabilityType::Unknown)
                            .export_values();
 
