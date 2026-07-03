@@ -22,3 +22,36 @@ TEST_CASE("slicing pipeline hook setter is a no-op-safe injection", "[slicing_pi
     Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr); // reset — must be legal
     CHECK(calls == 0);
 }
+
+#include "test_data.hpp"
+#include <vector>
+#include <algorithm>
+using namespace Slic3r::Test;
+
+TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slicing_pipeline]") {
+    struct Call { const Slic3r::PrintObject* obj; Slic3r::SlicingPipelineStep step; };
+    std::vector<Call> calls;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){ calls.push_back({o, s}); });
+
+    Slic3r::Print print; Slic3r::Model model;
+    Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
+    config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // activate
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    print.process();
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+
+    using S = Slic3r::SlicingPipelineStep;
+    auto count = [&](S s){ return std::count_if(calls.begin(), calls.end(), [&](const Call& c){ return c.step == s; }); };
+    CHECK(count(S::Slice) == 1);
+    CHECK(count(S::Perimeters) == 1);
+    CHECK(count(S::Infill) == 1);
+    CHECK(count(S::WipeTower) == 1);
+    CHECK(count(S::SkirtBrim) == 1);
+    // print-wide steps carry a null object:
+    for (const auto& c : calls)
+        if (c.step == S::WipeTower || c.step == S::SkirtBrim) CHECK(c.obj == nullptr);
+    // Slice must fire before Perimeters for the same object:
+    auto idx = [&](S s){ for (size_t i=0;i<calls.size();++i) if (calls[i].step==s) return (int)i; return -1; };
+    CHECK(idx(S::Slice) < idx(S::Perimeters));
+}
