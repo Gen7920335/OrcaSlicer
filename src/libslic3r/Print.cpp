@@ -50,6 +50,8 @@ using namespace nlohmann;
 
 namespace Slic3r {
 
+Print::SlicingPipelineHookFn Print::s_slicing_pipeline_hook_fn = nullptr;
+
 template class PrintState<PrintStep, psCount>;
 template class PrintState<PrintObjectStep, posCount>;
 

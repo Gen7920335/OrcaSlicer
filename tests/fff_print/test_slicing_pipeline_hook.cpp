@@ -12,3 +12,13 @@ TEST_CASE("slicing_pipeline_plugin option exists and defaults empty", "[slicing_
     CHECK(def->support_plugin == true);
     CHECK(def->gui_type == ConfigOptionDef::GUIType::plugin_picker);
 }
+
+#include "libslic3r/Print.hpp"
+
+TEST_CASE("slicing pipeline hook setter is a no-op-safe injection", "[slicing_pipeline]") {
+    int calls = 0;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){ ++calls; });
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr); // reset — must be legal
+    CHECK(calls == 0);
+}
