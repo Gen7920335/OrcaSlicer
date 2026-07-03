@@ -2636,7 +2636,10 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             || (use_cache &&(re_slicing_objects.count(obj) != 0))){
             const bool was_done = obj->is_step_done(posSimplifyPath);
             obj->simplify_extrusion_path();
-            if (m_pipeline_plugin_active && !was_done && obj->is_step_done(posSimplifyPath))
+            // Unlike every other seam (all inside the `if (!use_cache)` block above), this loop is
+            // shared with the use_cache path (re_slicing_objects), so `!use_cache` must be checked
+            // explicitly here to keep hooks from ever firing on cache-loaded (plugin-final) objects.
+            if (!use_cache && m_pipeline_plugin_active && !was_done && obj->is_step_done(posSimplifyPath))
                 run_pipeline_hook(SlicingPipelineStep::SimplifyPath, obj);
         }
         else {
