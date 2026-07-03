@@ -16,15 +16,8 @@ namespace py = pybind11;
 
 namespace {
 
-py::module_ import_orca_module()
-{
-    ensure_python_initialized();
-
-    // Force PythonPluginBridge.cpp into the test binary so the embedded
-    // PYBIND11_EMBEDDED_MODULE(orca, ...) registration is available.
-    (void) Slic3r::PythonPluginBridge::instance();
-    return py::module_::import("orca");
-}
+// import_orca_module() lives in python_test_support.hpp (shared with
+// test_slicing_pipeline_bindings.cpp).
 
 bool has_attr(const py::handle& object, const char* name)
 {

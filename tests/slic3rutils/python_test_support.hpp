@@ -6,6 +6,8 @@
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 
+#include <slic3r/plugin/PythonPluginBridge.hpp>
+
 namespace {
 
 void ensure_python_initialized()
@@ -21,6 +23,16 @@ void ensure_python_initialized()
         static pybind11::scoped_interpreter interpreter;
         (void) interpreter;
     }
+}
+
+pybind11::module_ import_orca_module()
+{
+    ensure_python_initialized();
+
+    // Force PythonPluginBridge.cpp into the test binary so the embedded
+    // PYBIND11_EMBEDDED_MODULE(orca, ...) registration is available.
+    (void) Slic3r::PythonPluginBridge::instance();
+    return pybind11::module_::import("orca");
 }
 
 } // namespace

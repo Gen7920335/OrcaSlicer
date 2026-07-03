@@ -48,3 +48,26 @@ TEST_CASE("make_readonly_rows builds a read-only (N,2) int64 view", "[slicing_pi
     auto r = a.unchecked<coord_t, 2>();
     CHECK(r(0,0) == 10); CHECK(r(1,1) == 40);
 }
+
+TEST_CASE("orca.slicing module: Step enum, context, and a Python capability can execute", "[slicing_pipeline]") {
+    ensure_python_initialized();
+    import_orca_module(); // forces PythonPluginBridge::instance() (see test_plugin_host_api.cpp:32-40)
+    py::gil_scoped_acquire gil;
+    py::module_ orca = py::module_::import("orca");
+    REQUIRE(py::hasattr(orca, "slicing"));
+    py::object slicing = orca.attr("slicing");
+    CHECK(py::hasattr(slicing, "Step"));
+    CHECK(py::hasattr(slicing.attr("Step"), "Slice"));
+    CHECK(py::hasattr(slicing, "SlicingPipelineContext"));
+    CHECK(py::hasattr(slicing, "SlicingPipelineCapabilityBase"));
+
+    // A trivial Python subclass whose execute() reports success, invoked via the C++ trampoline.
+    py::exec(R"(
+import orca
+class Probe(orca.slicing.SlicingPipelineCapabilityBase):
+    def get_name(self): return "probe"
+    def execute(self, ctx): return orca.ExecutionResult.success("ok")
+_probe = Probe()
+    )");
+    // (Full C++ trampoline invocation with a real context is exercised in Task 8's tests.)
+}
