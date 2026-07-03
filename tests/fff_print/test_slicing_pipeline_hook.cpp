@@ -96,6 +96,40 @@ TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)
     CHECK(normalize(run(false)) == normalize(run(true))); // firing nothing (inactive) must not perturb slicing
 }
 
+#include "libslic3r/Layer.hpp"          // Layer, LayerRegion (full defs for the cascade hook)
+#include "libslic3r/ClipperUtils.hpp"   // offset_ex
+
+// Task 11: the correctness heart of the mutation feature. A C++ hook insets every
+// region's `slices` at the Slice boundary (via SurfaceCollection::set with offset
+// polygons); because make_perimeters() derives fill_surfaces from slices AFTER the
+// Slice hook fires (see Print::process's split slice loop), the downstream
+// fill_surfaces area must shrink relative to a baseline (un-inset) run. This proves
+// the mutation cascade end-to-end using the same C++ APIs the Python mutators wrap.
+TEST_CASE("Mutating slices at the Slice boundary cascades downstream", "[slicing_pipeline]") {
+    auto fill_area = [](bool inset) {
+        Slic3r::Print print; Slic3r::Model model;
+        auto config = Slic3r::DynamicPrintConfig::full_print_config();
+        config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
+        if (inset) Slic3r::Print::set_slicing_pipeline_hook_fn(
+            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
+                if (s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+                for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
+                    for (Slic3r::LayerRegion* r : l->regions()) {
+                        Slic3r::Surfaces in = r->slices.surfaces;
+                        for (auto& sf : in) sf.expolygon = offset_ex(sf.expolygon, -scale_(1.0)).front();
+                        r->slices.set(std::move(in));
+                    }
+            });
+        else Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        print.process();
+        double a = 0; for (auto* l : print.objects().front()->layers()) for (auto* r : l->regions()) for (auto& s : r->fill_surfaces.surfaces) a += s.expolygon.area();
+        Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        return a;
+    };
+    CHECK(fill_area(true) < fill_area(false));
+}
+
 TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pipeline]") {
     Slic3r::Print print; Slic3r::Model model;
     auto config = Slic3r::DynamicPrintConfig::full_print_config();

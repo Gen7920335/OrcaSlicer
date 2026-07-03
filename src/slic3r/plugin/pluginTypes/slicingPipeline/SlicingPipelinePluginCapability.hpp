@@ -23,7 +23,13 @@ namespace Slic3r {
 // execute() calls or read one after execute() returns. Read now, copy what you
 // need, and let the views go.
 //
-// All accessors are read-only; mutation of the slicing graph is Task 11.
+// Read accessors are zero-copy and non-owning as described above. The 2D-geometry
+// mutators added in Task 11 (LayerRegionView.set_slices/set_fill_surfaces,
+// LayerView.set_lslices, SurfaceView.set_type) write THROUGH these const views by
+// const_cast: the pointed-to Layer/LayerRegion/Surface are genuinely non-const
+// (owned mutably by the Print; the dispatcher merely hands them out as const), the
+// same pattern the C++ slicing-pipeline hook uses. Mutations take effect on the live
+// slicing graph and cascade per the per-method contract documented in the bindings.
 // ---------------------------------------------------------------------------
 struct ExPolygonView   { const ExPolygon*   ex; pybind11::capsule owner; };
 struct SurfaceView     { const Surface*     s;  pybind11::capsule owner; };

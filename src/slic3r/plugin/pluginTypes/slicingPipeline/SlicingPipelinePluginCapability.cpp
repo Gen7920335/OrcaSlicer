@@ -63,6 +63,90 @@ static py::list path_data_list(const py::capsule& owner, const ExtrusionEntityCo
         out.append(PathData{ p, owner });
     return out;
 }
+
+// --- Task 11 input path: Python geometry -> C++ ExPolygon/Surface, with validation. -------
+// The mutators take scaled integer coords (the same units the read views hand out). A Python
+// raise here surfaces as ValueError (pybind translates) so malformed input is rejected up
+// front rather than silently corrupting the slicing graph.
+
+// One (N,2) int64 ndarray -> Polygon. Rejects wrong dtype/shape and degenerate (<3 pt) rings.
+// Float / NaN / inf are rejected implicitly: only a signed-integer, 8-byte (coord_t==int64)
+// dtype is accepted, and integer arrays cannot hold NaN/inf.
+static Polygon parse_polygon(py::handle h, const char* who)
+{
+    if (!py::isinstance<py::array>(h))
+        throw py::value_error(std::string(who) + ": each contour/hole must be an (N,2) int64 ndarray");
+    py::array a = py::reinterpret_borrow<py::array>(h);
+    if (a.dtype().kind() != 'i' || a.itemsize() != (py::ssize_t) sizeof(coord_t))
+        throw py::value_error(std::string(who) + ": polygon coordinates must be int64 (scaled coords)");
+    if (a.ndim() != 2 || a.shape(1) != 2)
+        throw py::value_error(std::string(who) + ": each polygon array must have shape (N,2)");
+    if (a.shape(0) < 3)
+        throw py::value_error(std::string(who) + ": a polygon needs at least 3 points");
+    // dtype already validated as int64; forcecast here only guarantees a C-contiguous buffer.
+    auto arr = py::array_t<coord_t, py::array::c_style | py::array::forcecast>::ensure(a);
+    if (!arr)
+        throw py::value_error(std::string(who) + ": could not read polygon as a contiguous int64 array");
+    auto r = arr.unchecked<2>();
+    Polygon poly;
+    poly.points.reserve((size_t) arr.shape(0));
+    for (py::ssize_t i = 0; i < arr.shape(0); ++i)
+        poly.points.emplace_back((coord_t) r(i, 0), (coord_t) r(i, 1));
+    return poly;
+}
+
+// One Python entry -> ExPolygon. Accepts either a bare (N,2) ndarray (contour only) or a
+// [contour, [hole, ...]] sequence. Orientation is normalized (contour CCW, holes CW) so
+// downstream area/offset math is correct regardless of the caller's winding.
+static ExPolygon parse_expolygon(py::handle entry, const char* who)
+{
+    ExPolygon ex;
+    if (py::isinstance<py::array>(entry)) {
+        ex.contour = parse_polygon(entry, who);
+    } else if (py::isinstance<py::sequence>(entry) && !py::isinstance<py::str>(entry)) {
+        py::sequence seq = py::reinterpret_borrow<py::sequence>(entry);
+        if (py::len(seq) < 1)
+            throw py::value_error(std::string(who) + ": a [contour, holes] entry needs a contour");
+        ex.contour = parse_polygon(seq[0], who);
+        if (py::len(seq) >= 2)
+            for (py::handle hh : py::reinterpret_borrow<py::sequence>(seq[1])) {
+                Polygon hole = parse_polygon(hh, who);
+                hole.make_clockwise();
+                ex.holes.emplace_back(std::move(hole));
+            }
+    } else {
+        throw py::value_error(std::string(who) + ": each entry must be an (N,2) ndarray or a [contour, holes] pair");
+    }
+    ex.contour.make_counter_clockwise();
+    return ex;
+}
+
+// A non-empty Python list of entries -> ExPolygons (each entry parsed + oriented).
+static ExPolygons parse_expolygon_list(py::handle list_h, const char* who)
+{
+    if (!py::isinstance<py::sequence>(list_h) || py::isinstance<py::str>(list_h))
+        throw py::value_error(std::string(who) + ": expected a list of polygons");
+    ExPolygons out;
+    for (py::handle entry : py::reinterpret_borrow<py::sequence>(list_h))
+        out.emplace_back(parse_expolygon(entry, who));
+    if (out.empty())
+        throw py::value_error(std::string(who) + ": expected a non-empty list of polygons");
+    return out;
+}
+
+// Build Surfaces from a Python list, carrying surface_type (and the other per-surface
+// attributes) forward from the collection being replaced, or defaulting to stInternal when
+// the region had no prior surfaces.
+static Surfaces surfaces_from_py(py::handle list_h, const SurfaceCollection& replaced, const char* who)
+{
+    ExPolygons ex = parse_expolygon_list(list_h, who);
+    const Surface tmpl = replaced.surfaces.empty() ? Surface(stInternal) : replaced.surfaces.front();
+    Surfaces out;
+    out.reserve(ex.size());
+    for (ExPolygon& e : ex)
+        out.emplace_back(Surface(tmpl, std::move(e)));
+    return out;
+}
 } // namespace
 
 void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::enum_<PluginCapabilityType>& pluginTypes) {
@@ -124,7 +208,16 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .def_property_readonly("extra_perimeters", [](const SurfaceView& v) { return v.s->extra_perimeters; })
         .def_property_readonly("expolygon",        [](const SurfaceView& v) {
             return ExPolygonView{ &v.s->expolygon, v.owner };
-        });
+        })
+        // MUTATOR (Task 11). Reclassify this surface's type (e.g. SurfaceType.stInternalSolid).
+        // set_type reassigns surface_type ONLY — it does not replace the geometry. Writes through
+        // the const view by const_cast (the Surface is non-const in the live slicing graph).
+        // Valid only during the execute(ctx) call.
+        .def("set_type", [](const SurfaceView& v, SurfaceType type) {
+            const_cast<Surface*>(v.s)->surface_type = type;
+        }, py::arg("surface_type"),
+           "Reclassify this surface's SurfaceType (reassigns surface_type only; the geometry "
+           "is unchanged). Valid only during the execute(ctx) call.");
 
     // A flattened toolpath. Read-only in v1 (mutation is a later phase). role/width/
     // height/mm3_per_mm are plain scalars; points() materializes a zero-copy array.
@@ -164,7 +257,39 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .def("fills", [](const LayerRegionView& v) {
             return path_data_list(v.owner, v.r->fills);
         }, "Infill toolpaths flattened to [PathData] (nested collections and loops "
-           "decomposed into their paths). Valid only during the execute(ctx) call.");
+           "decomposed into their paths). Valid only during the execute(ctx) call.")
+        // MUTATOR (Task 11). Replace this region's sliced surfaces. `polygons` is a list of
+        // (N,2) int64 ndarrays (scaled coords) or [contour, [holes...]] pairs; orientation is
+        // normalized (contour CCW, holes CW) and surface_type is carried forward from the
+        // replaced surfaces (else stInternal). Writes through the const view by const_cast.
+        .def("set_slices", [](const LayerRegionView& v, py::object polygons) {
+            auto* region = const_cast<LayerRegion*>(v.r);
+            region->slices.set(surfaces_from_py(polygons, region->slices, "set_slices"));
+        }, py::arg("polygons"),
+           "Replace this region's sliced surfaces from a list of (N,2) int64 ndarrays (scaled "
+           "coords) or [contour, [holes...]] pairs (orientation normalized: contour CCW / holes "
+           "CW; surface_type carried forward from the replaced surfaces, else stInternal).\n"
+           "MUTATION-CASCADE: at the Slice boundary this is the primary, fully-supported entry "
+           "point -- the split slice loop runs make_perimeters() afterward, so the change cascades "
+           "into perimeters and everything downstream (final G-code).\n"
+           "PERSISTENCE: the mutation is stored in the object's Layer data, so an incremental "
+           "re-slice with the Slice step cached does NOT re-apply it (the hook fires only on "
+           "genuine recomputation).\n"
+           "DUPLICATES: identical objects share Layer*, so the mutation on the object that slices "
+           "is automatically seen by its duplicates; objects that must mutate independently must "
+           "not be identical.\n"
+           "Raises ValueError on malformed input. Valid only during the execute(ctx) call.")
+        // MUTATOR (Task 11). Replace this region's fill (infill-prep) surfaces; identical input
+        // format and validation to set_slices.
+        .def("set_fill_surfaces", [](const LayerRegionView& v, py::object polygons) {
+            auto* region = const_cast<LayerRegion*>(v.r);
+            region->fill_surfaces.set(surfaces_from_py(polygons, region->fill_surfaces, "set_fill_surfaces"));
+        }, py::arg("polygons"),
+           "Replace this region's fill (infill-prep) surfaces; same input format/validation as "
+           "set_slices.\n"
+           "MUTATION-CASCADE: at the Infill boundary this changes the stored surfaces but does NOT "
+           "regenerate the already-built `fills` toolpaths in v1.\n"
+           "Raises ValueError on malformed input. Valid only during the execute(ctx) call.");
 
     py::class_<LayerView>(slicing, "LayerView")
         .def_property_readonly("slice_z", [](const LayerView& v) { return v.l->slice_z; })
@@ -183,7 +308,24 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
                 out.append(LayerRegionView{ r, v.owner });
             return out;
         }, "Per-region views as [LayerRegionView]. "
-           "Valid only during the execute(ctx) call.");
+           "Valid only during the execute(ctx) call.")
+        // MUTATOR (Task 11). Replace this layer's merged islands (lslices) and refresh the
+        // cache-invariant `lslices_bboxes` (one BoundingBox per island via get_extents). Same
+        // input format/validation as LayerRegionView.set_slices. Writes through the const view
+        // by const_cast.
+        .def("set_lslices", [](const LayerView& v, py::object islands) {
+            auto* layer = const_cast<Layer*>(v.l);
+            layer->lslices = parse_expolygon_list(islands, "set_lslices");
+            layer->lslices_bboxes.clear();
+            layer->lslices_bboxes.reserve(layer->lslices.size());
+            for (const ExPolygon& island : layer->lslices)
+                layer->lslices_bboxes.emplace_back(get_extents(island));
+        }, py::arg("islands"),
+           "Replace this layer's merged islands (lslices) from a list of (N,2) int64 ndarrays "
+           "(scaled coords) or [contour, [holes...]] pairs, and refresh lslices_bboxes (one "
+           "bounding box per island via get_extents) so the bbox cache stays consistent. Same "
+           "input format/validation as LayerRegionView.set_slices. Raises ValueError on malformed "
+           "input. Valid only during the execute(ctx) call.");
 
     py::class_<PrintObjectView>(slicing, "PrintObjectView")
         .def("layers", [](const PrintObjectView& v) {
