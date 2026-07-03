@@ -34,8 +34,7 @@ TEST_CASE("make_readonly_rows builds a read-only (N,2) int64 view", "[slicing_pi
         have_numpy = false;
     }
     if (!have_numpy) {
-        WARN("numpy unavailable in unit-test interpreter; skipping make_readonly_rows array assertions");
-        return;
+        SKIP("numpy unavailable in unit-test interpreter");
     }
 
     static Slic3r::Points pts = { Slic3r::Point(10, 20), Slic3r::Point(30, 40) };
