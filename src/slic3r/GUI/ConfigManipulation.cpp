@@ -832,6 +832,20 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
         "support_interface_loop_pattern", "support_bottom_interface_spacing" })
         toggle_field(el, have_support_material && have_support_interface);
 
+    const bool uses_current_nozzle_for_interface = config->opt_int("support_interface_filament") == 0;
+    const bool low_temperature_interface_available =
+        uses_current_nozzle_for_interface && have_support_material && have_support_interface;
+    const bool machine_has_auxiliary_fan =
+        preset_bundle->printers.get_edited_preset().config.opt_bool("auxiliary_fan");
+    toggle_field("single_nozzle_low_temperature_interface", low_temperature_interface_available);
+    toggle_field("support_interface_temperature",
+        low_temperature_interface_available && config->opt_bool("single_nozzle_low_temperature_interface"));
+    toggle_field("support_interface_auxiliary_fan_speed",
+        low_temperature_interface_available && config->opt_bool("single_nozzle_low_temperature_interface") &&
+        machine_has_auxiliary_fan);
+    toggle_field("support_interface_heating_time",
+        low_temperature_interface_available && config->opt_bool("single_nozzle_low_temperature_interface"));
+
     bool can_ironing_support = have_raft || (have_support_material && config->opt_int("support_interface_top_layers") > 0);
     toggle_field("support_ironing", can_ironing_support);
     bool has_support_ironing = can_ironing_support && config->opt_bool("support_ironing");

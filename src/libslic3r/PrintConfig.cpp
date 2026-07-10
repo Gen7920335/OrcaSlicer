@@ -3785,6 +3785,44 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("support_interface_cooling_position", coPoint);
+    def->label = L("Low temperature interface cooling position");
+    def->tooltip = L("Machine X/Y position for auxiliary-fan nozzle cooling. Negative values use the rear-left corner of the printable area.");
+    def->sidetext = L("mm");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionPoint(Vec2d(-1.0, -1.0)));
+
+    def = this->add("support_interface_brush_start", coPoint);
+    def->label = L("Nozzle brush start position");
+    def->tooltip = L("Machine X/Y position at one end of the nozzle brush.");
+    def->sidetext = L("mm");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionPoint(Vec2d(-1.0, -1.0)));
+
+    def = this->add("support_interface_brush_end", coPoint);
+    def->label = L("Nozzle brush end position");
+    def->tooltip = L("Machine X/Y position at the other end of the nozzle brush.");
+    def->sidetext = L("mm");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionPoint(Vec2d(-1.0, -1.0)));
+
+    def = this->add("support_interface_brush_repetitions", coInt);
+    def->label = L("Nozzle brush repetitions");
+    def->tooltip = L("Number of gentle round trips over the nozzle brush after cooling. Zero disables automatic brushing.");
+    def->min = 0;
+    def->max = 10;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionInt(0));
+
+    def = this->add("support_interface_brush_speed", coFloat);
+    def->label = L("Nozzle brush speed");
+    def->tooltip = L("Travel speed used while wiping the nozzle on the brush.");
+    def->sidetext = L("mm/s");
+    def->min = 1;
+    def->max = 500;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(80.0));
+
     def = this->add("fan_speedup_time", coFloat);
 	// Label is set in Tab.cpp in the Line object.
     //def->label = L("Fan speed-up time");
@@ -6316,6 +6354,46 @@ void PrintConfigDef::init_fff_params()
     append(def->enum_labels, support_interface_top_layers->enum_labels);
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionInt(0));
+
+    def = this->add("single_nozzle_low_temperature_interface", coBool);
+    def->label = L("Low temperature support interface");
+    def->category = L("Support");
+    def->tooltip = L("Print support interfaces at a separate lower nozzle temperature on single-nozzle printers. "
+                     "The nozzle waits for the interface temperature before printing and restores the active filament temperature before other extrusion.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("support_interface_temperature", coInt);
+    def->label = L("Support interface temperature");
+    def->category = L("Support");
+    def->tooltip = L("Nozzle temperature used only while printing support interface paths in single-nozzle low temperature interface mode.");
+    def->sidetext = L("°C");
+    def->min = 1;
+    def->max = 350;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionInt(170));
+
+    def = this->add("support_interface_auxiliary_fan_speed", coInt);
+    def->label = L("Auxiliary fan for nozzle cooling (air duct adapter required)");
+    def->category = L("Support");
+    def->tooltip = L("Auxiliary fan speed used to cool the nozzle before a low temperature support interface. "
+                     "A suitable air duct adapter is required to direct airflow onto the nozzle.");
+    def->sidetext = "%";
+    def->min = 0;
+    def->max = 100;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionInt(100));
+
+    def = this->add("support_interface_heating_time", coFloat);
+    def->label = L("Interface exit heating time");
+    def->category = L("Support");
+    def->tooltip = L("Time to heat toward the normal filament temperature before model extrusion resumes. "
+                     "The printer does not wait for the full target temperature.");
+    def->sidetext = L("s");
+    def->min = 0;
+    def->max = 60;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(5.0));
 
     def = this->add("support_interface_spacing", coFloat);
     def->label = L("Top interface spacing");

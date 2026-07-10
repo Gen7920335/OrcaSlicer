@@ -2887,6 +2887,12 @@ void TabPrint::build()
         optgroup->append_single_option_line("support_interface_filament", "support_settings_filament#interface");
         optgroup->append_single_option_line("support_interface_not_for_body", "support_settings_filament#avoid-interface-filament-for-base");
 
+        optgroup = page->new_optgroup(L("Low-temperature support interface"), L"param_support");
+        optgroup->append_single_option_line("single_nozzle_low_temperature_interface");
+        optgroup->append_single_option_line("support_interface_temperature");
+        optgroup->append_single_option_line("support_interface_auxiliary_fan_speed");
+        optgroup->append_single_option_line("support_interface_heating_time");
+
         optgroup = page->new_optgroup(L("Support ironing"), L"param_ironing");
         optgroup->append_single_option_line("support_ironing", "support_settings_ironing");
         optgroup->append_single_option_line("support_ironing_pattern", "support_settings_ironing#pattern");
@@ -4928,6 +4934,11 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("nozzle_type", "printer_basic_information_accessory#nozzle-type");
         optgroup->append_single_option_line("nozzle_hrc", "printer_basic_information_accessory#nozzle-hrc");
         optgroup->append_single_option_line("auxiliary_fan", "printer_basic_information_accessory#auxiliary-part-cooling-fan");
+        optgroup->append_single_option_line("support_interface_cooling_position");
+        optgroup->append_single_option_line("support_interface_brush_start");
+        optgroup->append_single_option_line("support_interface_brush_end");
+        optgroup->append_single_option_line("support_interface_brush_repetitions");
+        optgroup->append_single_option_line("support_interface_brush_speed");
         optgroup->append_single_option_line("support_chamber_temp_control", "printer_basic_information_accessory#support-controlling-chamber-temperature");
         optgroup->append_single_option_line("support_air_filtration", "printer_basic_information_accessory#support-air-filtration");
 

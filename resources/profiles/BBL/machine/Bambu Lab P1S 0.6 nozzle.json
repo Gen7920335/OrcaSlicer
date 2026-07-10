@@ -9,6 +9,11 @@
 		"0.6"
 	],
 	"printer_model": "Bambu Lab P1S",
+	"support_interface_cooling_position": "60x265",
+	"support_interface_brush_start": "70x265",
+	"support_interface_brush_end": "100x265",
+	"support_interface_brush_repetitions": "2",
+	"support_interface_brush_speed": "80",
 	"printer_variant": "0.6",
 	"default_print_profile": "0.30mm Standard @BBL X1C 0.6 nozzle",
 	"max_layer_height": [

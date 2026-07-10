@@ -166,6 +166,28 @@ static std::vector<Polygons> propagate_cura_style_support(
     if (config.support_on_build_plate_only.value)
         keep_buildplate_connected_support(support_by_layer, support_params);
 
+    // Stabilize already generated, printable columns from the build plate up.
+    // A model collision may cut a notch from a column, but later overhang
+    // sources must not refill that notch and change the column back into a
+    // rectangle. Sources farther than one extrusion width remain independent
+    // and are allowed to start a separate column.
+    const coord_t column_separation = support_params.support_material_flow.scaled_width();
+    for (size_t layer_idx = 1; layer_idx < layer_count; ++layer_idx) {
+        Polygons &current = support_by_layer[layer_idx];
+        const Polygons &below = support_by_layer[layer_idx - 1];
+        if (current.empty() || below.empty())
+            continue;
+
+        Polygons separate_columns = diff(
+            current,
+            offset(below, float(column_separation), SUPPORT_SURFACES_OFFSET_PARAMETERS));
+        Polygons stable_column = intersection(current, below);
+        current = separate_columns.empty() ?
+            std::move(stable_column) :
+            stable_column.empty() ? std::move(separate_columns) :
+            union_(stable_column, separate_columns);
+    }
+
     for (size_t layer_idx = 1; layer_idx + 1 < layer_count; ++layer_idx) {
         if (support_by_layer[layer_idx].empty())
             continue;

@@ -499,6 +499,7 @@ private:
     std::string     extrude_perimeters(const Print& print, const std::vector<ObjectByExtruder::Island::Region>& by_region, bool is_first_layer, bool is_infill_first);
     std::string     extrude_infill(const Print& print, const std::vector<ObjectByExtruder::Island::Region>& by_region, bool ironing);
     std::string     extrude_support(const ExtrusionEntityCollection& support_fills, const ExtrusionRole support_extrusion_role);
+    std::string     finish_low_temperature_support_interface();
 
     // BBS
     LiftType to_lift_type(ZHopType z_hop_types);
@@ -588,6 +589,7 @@ private:
     //double                              m_volumetric_speed;
     // Support for the extrusion role markers. Which marker is active?
     ExtrusionRole                       m_last_extrusion_role;
+    bool                                m_low_temperature_support_interface_active { false };
     // To ignore gapfill role for retract_lift_enforce
     ExtrusionRole                       m_last_notgapfill_extrusion_role;
     // Support for G-Code Processor

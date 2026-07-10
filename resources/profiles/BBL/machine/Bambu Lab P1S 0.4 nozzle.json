@@ -9,6 +9,11 @@
 		"0.4"
 	],
 	"printer_model": "Bambu Lab P1S",
+	"support_interface_cooling_position": "60x265",
+	"support_interface_brush_start": "70x265",
+	"support_interface_brush_end": "100x265",
+	"support_interface_brush_repetitions": "2",
+	"support_interface_brush_speed": "80",
 	"printer_variant": "0.4",
 	"bed_exclude_area": [
 		"0x0",
