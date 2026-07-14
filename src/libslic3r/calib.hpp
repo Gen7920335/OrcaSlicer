@@ -26,7 +26,8 @@ enum class CalibMode : int {
     Calib_Retraction_tower,
     Calib_Input_shaping_freq,
     Calib_Input_shaping_damp,
-    Calib_Cornering
+    Calib_Cornering,
+    Calib_LESIC
 };
 
 enum class CalibState { Start = 0, Preset, Calibration, CoarseSave, FineCalibration, Save, Finish };
@@ -36,6 +37,14 @@ struct Calib_Params
     Calib_Params() : mode(CalibMode::Calib_None){};
     int extruder_id = 0;
     double    start, end, step;
+    double    mvs_start = 8.0;
+    double    mvs_end = 24.0;
+    int       lesic_layers_per_temp = 10;
+    double    lesic_center_x = 0.0;
+    double    lesic_center_y = 0.0;
+    double    lesic_circle_diameter = 0.0;
+    double    lesic_line_width = 0.0;
+    double    lesic_layer_height = 0.0;
     bool      print_numbers;
     double freqStartX, freqEndX, freqStartY, freqEndY;
     int test_model;
